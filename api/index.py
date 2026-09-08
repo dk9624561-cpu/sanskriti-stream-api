@@ -127,6 +127,44 @@ def format_all_stream_qualities(base_dfile_url, vdc_id=""):
     qualities["master"] = url_str
     return qualities
 
+def get_verified_playable_url(raw_url):
+    """
+    Ensures that the stream URL actually exists and plays (returns HTTP 200).
+    If 720p returns 404, automatically falls back to 480p, master, 360p, or 240p.
+    """
+    if not raw_url or raw_url == "N/A":
+        return raw_url
+
+    url_str = str(raw_url).strip()
+    candidates = []
+
+    if "stream-os-assets.classx.co.in" in url_str or "classx.co.in" in url_str:
+        u_720 = re.sub(r'/(240p|360p|480p|720p|1080p)/', '/720p/', url_str)
+        u_480 = re.sub(r'/(240p|360p|480p|720p|1080p)/', '/480p/', url_str)
+        u_360 = re.sub(r'/(240p|360p|480p|720p|1080p)/', '/360p/', url_str)
+        u_240 = re.sub(r'/(240p|360p|480p|720p|1080p)/', '/240p/', url_str)
+        for c in [u_720, url_str, u_480, u_360, u_240]:
+            if c and c not in candidates:
+                candidates.append(c)
+    elif "liveclasses.cloud-front.in" in url_str:
+        for frag in ["Frag4", "Frag3", "Frag2", "Frag1"]:
+            c = fix_live_m3u8_url(url_str, frag.replace("Frag", ""))
+            if c not in candidates:
+                candidates.append(c)
+        candidates.append(url_str)
+    else:
+        candidates = [url_str]
+
+    for cand in candidates:
+        try:
+            r = requests.head(cand, timeout=3.5)
+            if r.status_code == 200:
+                return cand
+        except Exception:
+            pass
+
+    return url_str
+
 def call_sanskriti_api(endpoint, payload, jwt_token="", user_id="0"):
     """Calls app.sanskritiias.in directly with AES payload encryption"""
     url = "https://app.sanskritiias.in/index.php/data_model/" + endpoint
@@ -217,7 +255,7 @@ def codex_decrypt_handler():
                 if up_data.get("status") and up_data.get("url"):
                     stream_url = up_data.get("url")
                     qualities = format_all_stream_qualities(stream_url, vdc_id)
-                    final_url = qualities.get(target_q, stream_url)
+                    final_url = get_verified_playable_url(qualities.get(target_q, stream_url))
                     result = {
                         "status": True,
                         "url": final_url,
@@ -236,7 +274,7 @@ def codex_decrypt_handler():
     classx_url = decode_classx(vdc_id)
     if classx_url:
         qualities = format_all_stream_qualities(classx_url, vdc_id)
-        final_url = qualities.get(target_q, classx_url)
+        final_url = get_verified_playable_url(qualities.get(target_q, classx_url))
         result = {
             "status": True,
             "url": final_url,
